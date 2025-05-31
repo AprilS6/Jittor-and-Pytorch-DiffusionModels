@@ -158,7 +158,7 @@ class MidBlock(nn.Module):
         n_blocks: int = 1,
         n_groups: int = 32
     ):
-        super.__init__()
+        super().__init__()
         blks = []
         for _ in range(n_blocks):
             blks.append(ResBlock(n_channels, n_channels, time_channels, n_groups=n_groups))
@@ -232,6 +232,7 @@ class UNet(nn.Module):
         # n_resolutions层，每层先做n_blocks+1个ResAtnBlock，
         # 前n_blocks个与对应层倒数n-1个DownBlock/DownSample的输入进行skip connection，
         # 最后一个与对应层第一个ResAtnBlock的输入进行skip connection，并将通道数缩减为原来的1/ch_mults[i]
+        # up部分的UpBlock与down部分的DownBlock/DownSample是栈的FILO对应关系
         # --------------------------------------------------------------
         up = []
         for i in reversed(range(n_resolutions)):
@@ -252,13 +253,13 @@ class UNet(nn.Module):
     def execute(self, x: jt.Var, t: jt.Var):
         t = self.time_emb(t)
         x = self.img_proj(x)
-        skips = []
+        skips = [x] # 第一次DownBlock的输入
         for m in self.down:
             x = m(x, t)
-            skips.append(x)
+            skips.append(x) # 每一个块的输入(包括DownSample)
         x = self.middle(x, t)
         for m in self.up:
             if isinstance(m, UpSample) == False:
-                x = jt.concat([x, skips.pop()], dim=1)
+                x = jt.concat([x, skips.pop()], dim=1) # 除UpSample外其它块都做skip connection
             x = m(x, t)
         return self.final(self.act(self.norm(x)))

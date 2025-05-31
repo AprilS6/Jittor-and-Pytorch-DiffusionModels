@@ -1,7 +1,7 @@
 from torchvision import datasets, transforms
 from typing import Callable
 
-def load_data(
+def get_dataset(
         root: str="data",
         dataset_name: str = "cifar10",
         train: bool = True,

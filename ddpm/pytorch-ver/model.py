@@ -9,7 +9,7 @@ import os
 import json
 import matplotlib.pyplot as plt
 
-import prepare_data
+from load_data import get_dataset
 import denoise
 import unet
 import logger
@@ -21,7 +21,7 @@ default_config = {
     "num_epochs": 500,
     "current_epoch": 0,
     "batch_size": 128,
-    "num_workers": 12,
+    "num_workers": 4,
     "T": 1000,
     "lr": 1e-4,
     "max_norm": 1.0,
@@ -34,7 +34,7 @@ default_config = {
     "image_channels": 3,
     "n_channels": 128,
     "ch_mults": (1, 2, 2, 2),
-    "is_attn": (False, True, False, False),
+    "is_attn": (False, True, True, False),
     "n_blocks": 2,
 
     "log": True,
@@ -88,7 +88,7 @@ class DDPM:
         """
         训练
         """
-        dataset = prepare_data.load_data(self.data_root, self.dataset_name)
+        dataset = get_dataset(self.data_root, self.dataset_name)
         self.logger.info(f"Dataset {self.dataset_name} loaded: {len(dataset)}")
         train_loader = DataLoader(
             dataset,

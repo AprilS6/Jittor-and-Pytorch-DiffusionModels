@@ -1,15 +1,13 @@
 import jittor as jt
-from jittor.utils.data import DataLoader
-from jittor.nn.utils import clip_grad_norm_
-from jittor.optim.lr_scheduler import LambdaLR
+from jittor.dataset import DataLoader
+from jittor.optim import Optimizer, LambdaLR
 
 import tqdm
 import time
 import os
 import json
-import matplotlib.pyplot as plt
 
-import prepare_data
+from load_data import get_dataset
 import denoise
 import unet
 import logger
@@ -21,7 +19,7 @@ default_config = {
     "num_epochs": 500,
     "current_epoch": 0,
     "batch_size": 128,
-    "num_workers": 12,
+    "num_workers": 4,
     "T": 1000,
     "lr": 1e-4,
     "max_norm": 1.0,
@@ -29,12 +27,12 @@ default_config = {
     "beta_1": 0.0001,
     "beta_T": 0.02,
 
-    "device": "cuda" if torch.cuda.is_available() else "cpu",
+    "device": "cuda",
 
     "image_channels": 3,
     "n_channels": 128,
     "ch_mults": (1, 2, 2, 2),
-    "is_attn": (False, True, False, False),
+    "is_attn": (False, True, True, False),
     "n_blocks": 2,
 
     "log": True,
@@ -42,6 +40,7 @@ default_config = {
     "checkpoint": 5,
     "only_checkpoint_max": True,
 }
+
 
 class DDPM:
     """
@@ -54,6 +53,7 @@ class DDPM:
     ):
         self.config = json.load(open(config)) if isinstance(config, str) else config
         self.extract_config()
+        jt.flags.use_cuda = True if self.device == "cuda" else False
         # ---------------
         # 模型定义
         # ---------------
@@ -64,13 +64,12 @@ class DDPM:
                 ch_mults=self.ch_mults,
                 is_attn=self.is_attn,
                 n_blocks=self.n_blocks
-            ).to(self.device),
-            device=self.device,
+            ),
             T=self.T,
             beta_1=self.beta_1,
             beta_T=self.beta_T
         )
-        self.optimizer = torch.optim.Adam(
+        self.optimizer = jt.optim.Adam(
             self.denoise.eps_model.parameters(),
             lr=self.lr
         )
@@ -79,7 +78,7 @@ class DDPM:
             lr_lambda=lambda step: min(1.0, step / max(1, self.warmup))
         )
         if model_path is not None:
-            state_dict = torch.load(model_path, map_location=self.device, weights_only=True)
+            state_dict = jt.load(model_path)
             self.denoise.eps_model.load_state_dict(state_dict['model_state_dict'])
             self.optimizer.load_state_dict(state_dict['optimizer_state_dict'])
             self.logger.info(f"Model loaded from {model_path}")
@@ -88,14 +87,13 @@ class DDPM:
         """
         训练
         """
-        dataset = prepare_data.load_data(self.data_root, self.dataset_name)
+        dataset = get_dataset(self.data_root, self.dataset_name)
         self.logger.info(f"Dataset {self.dataset_name} loaded: {len(dataset)}")
         train_loader = DataLoader(
             dataset,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
-            shuffle=True,
-            pin_memory=True
+            shuffle=True
         )
         # log数据
         self.denoise.eps_model.train()
@@ -111,12 +109,11 @@ class DDPM:
             
             epoch_start = time.time()
             for i, (x, _) in enumerate(progress_bar):
-                x = x.to(self.device)
                 self.optimizer.zero_grad()
                 loss = self.denoise.loss(x)
                 loss.backward()
                 if self.max_norm > 0:
-                    clip_grad_norm_(self.denoise.eps_model.parameters(), max_norm=self.max_norm)
+                    Optimizer.clip_grad_norm(self.denoise.eps_model.parameters(), max_norm=self.max_norm)
                 self.optimizer.step()
                 self.lr_schedule.step()
                 step_loss = loss.item()
@@ -169,7 +166,7 @@ class DDPM:
         save_path = os.path.join(save_root, pth_name)
         self.unextract_config()
         json.dump(self.config, open(os.path.join(save_root, config_name), "w"), indent=4)
-        torch.save({
+        jt.save({
             'model_state_dict': self.denoise.eps_model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
         }, save_path)
@@ -191,13 +188,13 @@ class DDPM:
             xs[b, t, c, h, w]
         """
         self.denoise.eps_model.eval()
-        with torch.no_grad():
+        with jt.no_grad():
             self.logger.info(f"Sampling {batch_size} x0...")
             time_start = time.time()
             xs = [] # 降噪结果
-            x_t = torch.randn(batch_size, 3, 32, 32, device=self.device)
+            x_t = jt.randn(batch_size, self.image_channels, 32, 32)
             for t in reversed(range(0, self.T)):
-                t_tensor = torch.full((batch_size,), t, device=self.device, dtype=torch.long)
+                t_tensor = jt.full((batch_size,), t, dtype=jt.long)
                 x_t = self.denoise.p_sample(x_t, t_tensor)
                 if show_denoised > 0 and t % (self.T // show_denoised) == 0:
                     xs.append(((x_t + 1) / 2 * 255).clamp(0, 255).permute(0, 2, 3, 1).cpu())

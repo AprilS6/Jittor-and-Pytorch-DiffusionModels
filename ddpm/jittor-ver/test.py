@@ -1,24 +1,17 @@
 import jittor as jt
-import numpy as np
-from prepared_data import load_data
-import math
+from load_data import get_dataset
+from jittor.dataset import DataLoader
 
-class Test:
-    def __init__(self, n_channels):
-        self.n_channels = n_channels
-    
-    def test(self, t: jt.Var):
-        half_dim = self.n_channels // 8 # dim为Positional Embedding的维度
-        emb = jt.exp(jt.arange(half_dim) * -(math.log(10000) / (half_dim - 1)))
-        emb = t[:, None] * emb[None, :]
-        emb = jt.cat([emb.sin(), emb.cos()], dim=1)
-        return emb
 
 def main():
-    test = Test(4)
-    t = jt.int32(10)
-    emb = test.test(t)
-    print(emb)
+    jt.flags.use_cuda = 1
+    dataset = get_dataset(dataset_name="cifar10")
+    dataloader = DataLoader(dataset, batch_size=64, num_workers=2, shuffle=True)
+    for i, (x, y) in enumerate(dataloader):
+        print(x.shape, y.shape)
+        if i > 5:
+            break
+
 
 if __name__ == '__main__':
     main()
